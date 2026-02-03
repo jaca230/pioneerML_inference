@@ -8,12 +8,11 @@ REPO_DIR=$(realpath "${BASE_DIR}/../..")
 # Prefer system libs over conda to avoid GLIBCXX mismatches at runtime.
 export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
+MODE="group_classifier"
 MODEL_PATH_DEFAULT="${REPO_DIR}/trained_models/groupclassifier/groupclassifier_20260203_055139_torchscript.pt"
 INPUT_PATH_DEFAULT="${REPO_DIR}/data/ml_output_000.parquet"
-OUTPUT_DIR_DEFAULT="${REPO_DIR}/data/inference_outputs/group_classifier"
+OUTPUT_DIR_DEFAULT="${REPO_DIR}/data/inference_outputs/${MODE}"
 OUTPUT_PATH_DEFAULT="${OUTPUT_DIR_DEFAULT}/preds.parquet"
-
-MODE="group_classifier"
 MODEL_PATH="$MODEL_PATH_DEFAULT"
 INPUT_PATHS=()
 OUTPUT_PATH="$OUTPUT_PATH_DEFAULT"
@@ -68,6 +67,11 @@ done
 
 if [ ${#INPUT_PATHS[@]} -eq 0 ]; then
   INPUT_PATHS+=("$INPUT_PATH_DEFAULT")
+fi
+
+if [ "$OUTPUT_PATH" = "$OUTPUT_PATH_DEFAULT" ]; then
+  OUTPUT_DIR_DEFAULT="${REPO_DIR}/data/inference_outputs/${MODE}"
+  OUTPUT_PATH="${OUTPUT_DIR_DEFAULT}/preds.parquet"
 fi
 
 mkdir -p "$(dirname "$OUTPUT_PATH")"

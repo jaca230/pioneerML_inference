@@ -5,11 +5,12 @@
 #include <vector>
 
 #include "pioneerml_inference/runner/group_classifier_runner.h"
+#include "pioneerml_inference/runner/group_classifier_event_runner.h"
 
 namespace {
 
 void PrintUsage() {
-  std::cerr << "Usage: pioneerml_inference --mode group_classifier --model <path> --input <file> [--input <file> ...] --output <path> [--config <json>] [--device cpu|cuda] [--check-accuracy] [--metrics-out <path>] [--threshold <float>]\n";
+  std::cerr << "Usage: pioneerml_inference --mode group_classifier|group_classifier_event --model <path> --input <file> [--input <file> ...] --output <path> [--config <json>] [--device cpu|cuda] [--check-accuracy] [--metrics-out <path>] [--threshold <float>]\n";
 }
 
 std::string ReadFile(const std::string& path) {
@@ -77,6 +78,20 @@ int main(int argc, char** argv) {
   try {
     if (mode == "group_classifier") {
       pioneerml::inference::runner::GroupClassifierRunner runner;
+      pioneerml::inference::runner::RunOptions options;
+      options.model_path = model_path;
+      options.parquet_paths = inputs;
+      options.output_path = output_path;
+      options.config_json = config_json;
+      options.device = device;
+      options.check_accuracy = check_accuracy;
+      options.metrics_output_path = metrics_output_path;
+      options.threshold = threshold;
+      runner.Run(options);
+      return 0;
+    }
+    if (mode == "group_classifier_event") {
+      pioneerml::inference::runner::GroupClassifierEventRunner runner;
       pioneerml::inference::runner::RunOptions options;
       options.model_path = model_path;
       options.parquet_paths = inputs;
