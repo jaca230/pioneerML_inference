@@ -1,6 +1,7 @@
 #include "pioneerml_inference/runner/group_classifier_runner.h"
 
 #include <stdexcept>
+#include <fstream>
 
 #include <arrow/api.h>
 #include <nlohmann/json.hpp>
@@ -74,6 +75,23 @@ std::shared_ptr<arrow::Array> TensorToArrowFloat(const torch::Tensor& tensor) {
   return arrow::MakeArray(data);
 }
 
+torch::Tensor ArrowToFloatMatrix(const std::shared_ptr<arrow::Array>& array,
+                                 int64_t rows,
+                                 int64_t cols) {
+  return ArrowToTensor(array, {rows, cols}, torch::kFloat32);
+}
+
+void WriteMetrics(const nlohmann::json& metrics, const std::string& path) {
+  if (path.empty()) {
+    return;
+  }
+  std::ofstream out(path);
+  if (!out) {
+    throw std::runtime_error("Failed to open metrics output path: " + path);
+  }
+  out << metrics.dump(2) << std::endl;
+}
+
 }  // namespace
 
 void GroupClassifierRunner::Run(const RunOptions& options) {
@@ -113,16 +131,15 @@ void GroupClassifierRunner::Run(const RunOptions& options) {
   int64_t total_nodes = LastValue(inputs->node_ptr);
   int64_t total_edges = LastValue(inputs->edge_ptr);
   int64_t num_graphs = static_cast<int64_t>(inputs->num_graphs);
-
   auto node_ptr = ArrowToTensor(inputs->node_ptr, {num_graphs + 1}, torch::kInt64);
   auto edge_ptr = ArrowToTensor(inputs->edge_ptr, {num_graphs + 1}, torch::kInt64);
   (void)edge_ptr;
-  auto group_ptr = ArrowToTensor(inputs->group_ptr, {num_graphs + 1}, torch::kInt64);
 
   auto x = ArrowToTensor(inputs->node_features, {total_nodes, 4}, torch::kFloat32);
-  auto edge_index = ArrowToTensor(inputs->edge_index, {2, total_edges}, torch::kInt64);
+  auto edge_index_pairs = ArrowToTensor(inputs->edge_index, {total_edges, 2}, torch::kInt64);
+  auto edge_index = edge_index_pairs.t().contiguous();
   auto edge_attr = ArrowToTensor(inputs->edge_attr, {total_edges, 4}, torch::kFloat32);
-  auto time_group_ids = ArrowToTensor(inputs->time_group_ids, {total_nodes}, torch::kInt64);
+  auto u = ArrowToTensor(inputs->u, {num_graphs, 1}, torch::kFloat32);
 
   auto batch = BuildBatchFromNodePtr(inputs->node_ptr, total_nodes);
 
@@ -131,11 +148,16 @@ void GroupClassifierRunner::Run(const RunOptions& options) {
     edge_index = edge_index.to(device);
     edge_attr = edge_attr.to(device);
     batch = batch.to(device);
-    time_group_ids = time_group_ids.to(device);
-    group_ptr = group_ptr.to(device);
+    u = u.to(device);
   }
 
-  std::vector<torch::jit::IValue> ivals = {x, edge_index, edge_attr, batch, group_ptr, time_group_ids};
+  std::vector<torch::jit::IValue> ivals = {
+      x,
+      edge_index,
+      edge_attr,
+      batch,
+      u,
+  };
   auto logits = model.forward(ivals).toTensor();
   auto preds = torch::sigmoid(logits);
 
@@ -145,12 +167,51 @@ void GroupClassifierRunner::Run(const RunOptions& options) {
 
   auto pred_arr = TensorToArrowFloat(preds);
 
+  if (options.check_accuracy) {
+    if (!inputs->y) {
+      throw std::runtime_error("check_accuracy requested but targets are missing.");
+    }
+    auto targets = ArrowToFloatMatrix(inputs->y, num_graphs, 3);
+    auto preds_cpu = preds.to(torch::kCPU);
+    double threshold = options.threshold;
+    auto probs = preds_cpu;
+    auto preds_binary = (probs >= threshold).to(torch::kFloat32);
+    auto targets_f = targets.to(torch::kFloat32);
+    auto accuracy = (preds_binary == targets_f).to(torch::kFloat32).mean().item<double>();
+    auto exact_match = (preds_binary == targets_f).all(1).to(torch::kFloat32).mean().item<double>();
+
+    int64_t num_classes = targets_f.size(1);
+    nlohmann::json confusion = nlohmann::json::array();
+    for (int64_t cls = 0; cls < num_classes; ++cls) {
+      auto truth = targets_f.select(1, cls);
+      auto pred = preds_binary.select(1, cls);
+      auto tn = ((truth == 0) & (pred == 0)).sum().item<int64_t>();
+      auto fp = ((truth == 0) & (pred == 1)).sum().item<int64_t>();
+      auto fn = ((truth == 1) & (pred == 0)).sum().item<int64_t>();
+      auto tp = ((truth == 1) & (pred == 1)).sum().item<int64_t>();
+      double total = static_cast<double>(tp + fp + fn);
+      double tp_rate = total > 0.0 ? static_cast<double>(tp) / total : 0.0;
+      double fp_rate = total > 0.0 ? static_cast<double>(fp) / total : 0.0;
+      double fn_rate = total > 0.0 ? static_cast<double>(fn) / total : 0.0;
+      confusion.push_back({{"tp", tp_rate}, {"fp", fp_rate}, {"fn", fn_rate}});
+    }
+
+    nlohmann::json metrics;
+    metrics["loss"] = nullptr;
+    metrics["accuracy"] = accuracy;
+    metrics["exact_match"] = exact_match;
+    metrics["confusion"] = confusion;
+    metrics["threshold"] = threshold;
+    std::cout << metrics.dump() << std::endl;
+    WriteMetrics(metrics, options.metrics_output_path);
+  }
+
   pioneerml::output_adapters::graph::GroupClassifierOutputAdapter output_adapter;
   output_adapter.WriteParquet(options.output_path,
                               pred_arr,
                               nullptr,
-                              inputs->node_ptr,
-                              inputs->time_group_ids);
+                              inputs->graph_event_ids,
+                              inputs->graph_group_ids);
 }
 
 }  // namespace pioneerml::inference::runner

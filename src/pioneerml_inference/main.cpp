@@ -9,7 +9,7 @@
 namespace {
 
 void PrintUsage() {
-  std::cerr << "Usage: pioneerml_inference --mode group_classifier --model <path> --input <file> [--input <file> ...] --output <path> [--config <json>] [--device cpu|cuda]\n";
+  std::cerr << "Usage: pioneerml_inference --mode group_classifier --model <path> --input <file> [--input <file> ...] --output <path> [--config <json>] [--device cpu|cuda] [--check-accuracy] [--metrics-out <path>] [--threshold <float>]\n";
 }
 
 std::string ReadFile(const std::string& path) {
@@ -31,6 +31,9 @@ int main(int argc, char** argv) {
   std::string config_json;
   std::string config_path;
   std::string device = "cpu";
+  bool check_accuracy = false;
+  std::string metrics_output_path;
+  double threshold = 0.5;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -46,6 +49,12 @@ int main(int argc, char** argv) {
       config_path = argv[++i];
     } else if (arg == "--device" && i + 1 < argc) {
       device = argv[++i];
+    } else if (arg == "--check-accuracy") {
+      check_accuracy = true;
+    } else if (arg == "--metrics-out" && i + 1 < argc) {
+      metrics_output_path = argv[++i];
+    } else if (arg == "--threshold" && i + 1 < argc) {
+      threshold = std::stod(argv[++i]);
     } else if (arg == "-h" || arg == "--help") {
       PrintUsage();
       return 0;
@@ -74,6 +83,9 @@ int main(int argc, char** argv) {
       options.output_path = output_path;
       options.config_json = config_json;
       options.device = device;
+      options.check_accuracy = check_accuracy;
+      options.metrics_output_path = metrics_output_path;
+      options.threshold = threshold;
       runner.Run(options);
       return 0;
     }

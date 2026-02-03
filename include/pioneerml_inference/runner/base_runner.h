@@ -11,6 +11,9 @@ struct RunOptions {
   std::string output_path;
   std::string config_json;
   std::string device{"cpu"};
+  bool check_accuracy{false};
+  std::string metrics_output_path;
+  double threshold{0.5};
 };
 
 class BaseRunner {
