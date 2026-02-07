@@ -9,12 +9,13 @@ REPO_DIR=$(realpath "${BASE_DIR}/../..")
 export LD_LIBRARY_PATH="/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
 
 MODE="group_classifier"
-MODEL_PATH_DEFAULT="${REPO_DIR}/trained_models/groupclassifier/groupclassifier_20260203_055139_torchscript.pt"
 INPUT_PATH_DEFAULT="${REPO_DIR}/data/ml_output_000.parquet"
 OUTPUT_DIR_DEFAULT="${REPO_DIR}/data/inference_outputs/${MODE}"
 OUTPUT_PATH_DEFAULT="${OUTPUT_DIR_DEFAULT}/preds.parquet"
-MODEL_PATH="$MODEL_PATH_DEFAULT"
+MODEL_PATH=""
+MODEL_SET="false"
 INPUT_PATHS=()
+INPUT_GROUPS=()
 OUTPUT_PATH="$OUTPUT_PATH_DEFAULT"
 DEVICE="cuda"
 CONFIG_PATH=""
@@ -29,6 +30,7 @@ show_help() {
   echo "  -m, --mode <name>          Model mode (default: group_classifier)"
   echo "  -M, --model <path>         TorchScript model path"
   echo "  -i, --input <path>         Parquet input path (repeatable)"
+  echo "  -g, --input-group <csv>    Grouped parquet inputs, comma-separated (repeatable)"
   echo "  -o, --output <path>        Output parquet path"
   echo "  -d, --device <cpu|cuda>    Device (default: cuda)"
   echo "  -c, --config <path>        Adapter config JSON"
@@ -38,14 +40,41 @@ show_help() {
   echo "  -h, --help                 Show help"
 }
 
+build_default_output_path() {
+  local mode="$1"
+  shift
+  local inputs=("$@")
+  local out_dir="${REPO_DIR}/data/inference_outputs/${mode}"
+  mkdir -p "$out_dir"
+
+  if [ ${#inputs[@]} -eq 1 ]; then
+    local base
+    base=$(basename "${inputs[0]}")
+    base="${base%.parquet}"
+    echo "${out_dir}/${base}_preds.parquet"
+    return
+  fi
+
+  local first last first_base last_base
+  first="${inputs[0]}"
+  last="${inputs[${#inputs[@]}-1]}"
+  first_base=$(basename "${first}")
+  last_base=$(basename "${last}")
+  first_base="${first_base%.parquet}"
+  last_base="${last_base%.parquet}"
+  echo "${out_dir}/${first_base}_to_${last_base}_${#inputs[@]}files_preds.parquet"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -m|--mode)
       MODE="$2"; shift 2;;
     -M|--model)
-      MODEL_PATH="$2"; shift 2;;
+      MODEL_PATH="$2"; MODEL_SET="true"; shift 2;;
     -i|--input)
       INPUT_PATHS+=("$2"); shift 2;;
+    -g|--input-group)
+      INPUT_GROUPS+=("$2"); shift 2;;
     -o|--output)
       OUTPUT_PATH="$2"; shift 2;;
     -d|--device)
@@ -66,12 +95,49 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [ ${#INPUT_PATHS[@]} -eq 0 ]; then
-  INPUT_PATHS+=("$INPUT_PATH_DEFAULT")
+  if [ ${#INPUT_GROUPS[@]} -eq 0 ]; then
+    INPUT_PATHS+=("$INPUT_PATH_DEFAULT")
+  fi
+fi
+
+if [ "$MODEL_SET" != "true" ]; then
+  case "$MODE" in
+    group_classifier)
+      MODEL_PATH="${REPO_DIR}/trained_models/groupclassifier/groupclassifier_20260203_055139_torchscript.pt"
+      ;;
+    group_classifier_event)
+      MODEL_PATH="${REPO_DIR}/trained_models/groupclassifier_event/groupclassifier_event_20260203_111205_torchscript.pt"
+      ;;
+    group_splitter)
+      LATEST_SPLITTER=$(ls -1t "${REPO_DIR}"/trained_models/groupsplitter/*_torchscript.pt 2>/dev/null | head -n1 || true)
+      MODEL_PATH="${LATEST_SPLITTER}"
+      ;;
+    group_splitter_event)
+      LATEST_SPLITTER_EVENT=$(ls -1t "${REPO_DIR}"/trained_models/groupsplitter_event/*_torchscript.pt 2>/dev/null | head -n1 || true)
+      MODEL_PATH="${LATEST_SPLITTER_EVENT}"
+      ;;
+    *)
+      MODEL_PATH="${REPO_DIR}/trained_models/groupclassifier/groupclassifier_20260203_055139_torchscript.pt"
+      ;;
+  esac
+fi
+
+if [ -z "$MODEL_PATH" ]; then
+  echo "[run.sh] Could not infer default model path for mode '$MODE'. Please pass --model."
+  exit 1
 fi
 
 if [ "$OUTPUT_PATH" = "$OUTPUT_PATH_DEFAULT" ]; then
-  OUTPUT_DIR_DEFAULT="${REPO_DIR}/data/inference_outputs/${MODE}"
-  OUTPUT_PATH="${OUTPUT_DIR_DEFAULT}/preds.parquet"
+  OUTPUT_BASIS=("${INPUT_PATHS[@]}")
+  if [ ${#OUTPUT_BASIS[@]} -eq 0 ]; then
+    for g in "${INPUT_GROUPS[@]}"; do
+      first="${g%%,*}"
+      if [ -n "$first" ]; then
+        OUTPUT_BASIS+=("$first")
+      fi
+    done
+  fi
+  OUTPUT_PATH="$(build_default_output_path "$MODE" "${OUTPUT_BASIS[@]}")"
 fi
 
 mkdir -p "$(dirname "$OUTPUT_PATH")"
@@ -85,6 +151,10 @@ CMD=("${BASE_DIR}/build/pioneerml_inference"
 
 for p in "${INPUT_PATHS[@]}"; do
   CMD+=(--input "$p")
+done
+
+for g in "${INPUT_GROUPS[@]}"; do
+  CMD+=(--input-group "$g")
 done
 
 if [ -n "$CONFIG_PATH" ]; then

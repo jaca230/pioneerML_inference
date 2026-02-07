@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json.hpp>
+
 #include <string>
 #include <vector>
 
@@ -7,7 +9,7 @@ namespace pioneerml::inference::runner {
 
 struct RunOptions {
   std::string model_path;
-  std::vector<std::string> parquet_paths;
+  nlohmann::json input_spec;
   std::string output_path;
   std::string config_json;
   std::string device{"cpu"};

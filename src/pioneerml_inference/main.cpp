@@ -1,16 +1,20 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "pioneerml_inference/runner/group_classifier_runner.h"
 #include "pioneerml_inference/runner/group_classifier_event_runner.h"
+#include "pioneerml_inference/runner/group_splitter_runner.h"
+#include "pioneerml_inference/runner/group_splitter_event_runner.h"
 
 namespace {
 
 void PrintUsage() {
-  std::cerr << "Usage: pioneerml_inference --mode group_classifier|group_classifier_event --model <path> --input <file> [--input <file> ...] --output <path> [--config <json>] [--device cpu|cuda] [--check-accuracy] [--metrics-out <path>] [--threshold <float>]\n";
+  std::cerr << "Usage: pioneerml_inference --mode group_classifier|group_classifier_event|group_splitter|group_splitter_event --model <path> --input <file> [--input <file> ...] [--input-group <file0,file1,...>] --output <path> [--config <json>] [--device cpu|cuda] [--check-accuracy] [--metrics-out <path>] [--threshold <float>]\n";
 }
 
 std::string ReadFile(const std::string& path) {
@@ -28,6 +32,7 @@ int main(int argc, char** argv) {
   std::string mode;
   std::string model_path;
   std::vector<std::string> inputs;
+  std::vector<std::vector<std::string>> input_groups;
   std::string output_path;
   std::string config_json;
   std::string config_path;
@@ -44,6 +49,21 @@ int main(int argc, char** argv) {
       model_path = argv[++i];
     } else if (arg == "--input" && i + 1 < argc) {
       inputs.emplace_back(argv[++i]);
+    } else if (arg == "--input-group" && i + 1 < argc) {
+      std::string raw = argv[++i];
+      std::vector<std::string> group;
+      std::stringstream ss(raw);
+      std::string item;
+      while (std::getline(ss, item, ',')) {
+        if (!item.empty()) {
+          group.push_back(item);
+        }
+      }
+      if (group.empty()) {
+        std::cerr << "Invalid --input-group value: " << raw << "\n";
+        return 1;
+      }
+      input_groups.push_back(std::move(group));
     } else if (arg == "--output" && i + 1 < argc) {
       output_path = argv[++i];
     } else if (arg == "--config" && i + 1 < argc) {
@@ -70,17 +90,41 @@ int main(int argc, char** argv) {
     config_json = ReadFile(config_path);
   }
 
-  if (mode.empty() || model_path.empty() || inputs.empty() || output_path.empty()) {
+  if (input_groups.empty()) {
+    for (const auto& input : inputs) {
+      input_groups.push_back({input});
+    }
+  }
+
+  if (mode.empty() || model_path.empty() || input_groups.empty() || output_path.empty()) {
     PrintUsage();
     return 1;
   }
+
+  auto build_input_spec = [&](const std::string& current_mode) -> nlohmann::json {
+    nlohmann::json files = nlohmann::json::array();
+    for (const auto& group : input_groups) {
+      if (group.empty()) {
+        continue;
+      }
+      nlohmann::json item;
+      item["mainFile"] = group[0];
+      if ((current_mode == "group_splitter" || current_mode == "group_splitter_event") && group.size() >= 2) {
+        item["group_probs"] = group[1];
+      }
+      files.push_back(item);
+    }
+    nlohmann::json spec;
+    spec["files"] = files;
+    return spec;
+  };
 
   try {
     if (mode == "group_classifier") {
       pioneerml::inference::runner::GroupClassifierRunner runner;
       pioneerml::inference::runner::RunOptions options;
       options.model_path = model_path;
-      options.parquet_paths = inputs;
+      options.input_spec = build_input_spec(mode);
       options.output_path = output_path;
       options.config_json = config_json;
       options.device = device;
@@ -94,7 +138,35 @@ int main(int argc, char** argv) {
       pioneerml::inference::runner::GroupClassifierEventRunner runner;
       pioneerml::inference::runner::RunOptions options;
       options.model_path = model_path;
-      options.parquet_paths = inputs;
+      options.input_spec = build_input_spec(mode);
+      options.output_path = output_path;
+      options.config_json = config_json;
+      options.device = device;
+      options.check_accuracy = check_accuracy;
+      options.metrics_output_path = metrics_output_path;
+      options.threshold = threshold;
+      runner.Run(options);
+      return 0;
+    }
+    if (mode == "group_splitter") {
+      pioneerml::inference::runner::GroupSplitterRunner runner;
+      pioneerml::inference::runner::RunOptions options;
+      options.model_path = model_path;
+      options.input_spec = build_input_spec(mode);
+      options.output_path = output_path;
+      options.config_json = config_json;
+      options.device = device;
+      options.check_accuracy = check_accuracy;
+      options.metrics_output_path = metrics_output_path;
+      options.threshold = threshold;
+      runner.Run(options);
+      return 0;
+    }
+    if (mode == "group_splitter_event") {
+      pioneerml::inference::runner::GroupSplitterEventRunner runner;
+      pioneerml::inference::runner::RunOptions options;
+      options.model_path = model_path;
+      options.input_spec = build_input_spec(mode);
       options.output_path = output_path;
       options.config_json = config_json;
       options.device = device;

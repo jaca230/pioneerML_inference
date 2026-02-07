@@ -134,8 +134,9 @@ void GroupClassifierEventRunner::Run(const RunOptions& options) {
   if (options.model_path.empty()) {
     throw std::runtime_error("model_path is required");
   }
-  if (options.parquet_paths.empty()) {
-    throw std::runtime_error("parquet_paths is required");
+  if (!options.input_spec.is_object() || !options.input_spec.contains("files") ||
+      !options.input_spec.at("files").is_array() || options.input_spec.at("files").empty()) {
+    throw std::runtime_error("input_spec.files is required");
   }
   if (options.output_path.empty()) {
     throw std::runtime_error("output_path is required");
@@ -177,7 +178,7 @@ void GroupClassifierEventRunner::Run(const RunOptions& options) {
     input_adapter.LoadConfig(config);
   }
 
-  auto bundle = input_adapter.LoadInference(options.parquet_paths);
+  auto bundle = input_adapter.LoadInference(options.input_spec);
   auto* inputs = dynamic_cast<pioneerml::GroupClassifierInputs*>(bundle.inputs.get());
   if (!inputs) {
     throw std::runtime_error("Failed to cast inputs to GroupClassifierInputs");
