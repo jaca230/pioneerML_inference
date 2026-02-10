@@ -10,11 +10,14 @@
 #include "pioneerml_inference/runner/group_classifier_event_runner.h"
 #include "pioneerml_inference/runner/group_splitter_runner.h"
 #include "pioneerml_inference/runner/group_splitter_event_runner.h"
+#include "pioneerml_inference/runner/event_splitter_event_runner.h"
+#include "pioneerml_inference/runner/endpoint_regressor_runner.h"
+#include "pioneerml_inference/runner/endpoint_regressor_event_runner.h"
 
 namespace {
 
 void PrintUsage() {
-  std::cerr << "Usage: pioneerml_inference --mode group_classifier|group_classifier_event|group_splitter|group_splitter_event --model <path> --input <file> [--input <file> ...] [--input-group <file0,file1,...>] --output <path> [--config <json>] [--device cpu|cuda] [--check-accuracy] [--metrics-out <path>] [--threshold <float>]\n";
+  std::cerr << "Usage: pioneerml_inference --mode group_classifier|group_classifier_event|group_splitter|group_splitter_event|event_splitter_event|endpoint_regressor|endpoint_regressor_event --model <path> --input <file> [--input <file> ...] [--input-group <file0,file1,...>] --output <path> [--config <json>] [--device cpu|cuda] [--check-accuracy] [--metrics-out <path>] [--threshold <float>]\n";
 }
 
 std::string ReadFile(const std::string& path) {
@@ -111,6 +114,23 @@ int main(int argc, char** argv) {
       item["mainFile"] = group[0];
       if ((current_mode == "group_splitter" || current_mode == "group_splitter_event") && group.size() >= 2) {
         item["group_probs"] = group[1];
+      } else if (current_mode == "endpoint_regressor" || current_mode == "endpoint_regressor_event") {
+        if (group.size() >= 2) {
+          item["group_probs"] = group[1];
+        }
+        if (group.size() >= 3) {
+          item["group_splitter_probs"] = group[2];
+        }
+      } else if (current_mode == "event_splitter_event") {
+        if (group.size() >= 2) {
+          item["group_probs"] = group[1];
+        }
+        if (group.size() >= 3) {
+          item["group_splitter_probs"] = group[2];
+        }
+        if (group.size() >= 4) {
+          item["endpoint_preds"] = group[3];
+        }
       }
       files.push_back(item);
     }
@@ -164,6 +184,48 @@ int main(int argc, char** argv) {
     }
     if (mode == "group_splitter_event") {
       pioneerml::inference::runner::GroupSplitterEventRunner runner;
+      pioneerml::inference::runner::RunOptions options;
+      options.model_path = model_path;
+      options.input_spec = build_input_spec(mode);
+      options.output_path = output_path;
+      options.config_json = config_json;
+      options.device = device;
+      options.check_accuracy = check_accuracy;
+      options.metrics_output_path = metrics_output_path;
+      options.threshold = threshold;
+      runner.Run(options);
+      return 0;
+    }
+    if (mode == "endpoint_regressor") {
+      pioneerml::inference::runner::EndpointRegressorRunner runner;
+      pioneerml::inference::runner::RunOptions options;
+      options.model_path = model_path;
+      options.input_spec = build_input_spec(mode);
+      options.output_path = output_path;
+      options.config_json = config_json;
+      options.device = device;
+      options.check_accuracy = check_accuracy;
+      options.metrics_output_path = metrics_output_path;
+      options.threshold = threshold;
+      runner.Run(options);
+      return 0;
+    }
+    if (mode == "endpoint_regressor_event") {
+      pioneerml::inference::runner::EndpointRegressorEventRunner runner;
+      pioneerml::inference::runner::RunOptions options;
+      options.model_path = model_path;
+      options.input_spec = build_input_spec(mode);
+      options.output_path = output_path;
+      options.config_json = config_json;
+      options.device = device;
+      options.check_accuracy = check_accuracy;
+      options.metrics_output_path = metrics_output_path;
+      options.threshold = threshold;
+      runner.Run(options);
+      return 0;
+    }
+    if (mode == "event_splitter_event") {
+      pioneerml::inference::runner::EventSplitterEventRunner runner;
       pioneerml::inference::runner::RunOptions options;
       options.model_path = model_path;
       options.input_spec = build_input_spec(mode);

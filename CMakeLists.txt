@@ -53,6 +53,9 @@ add_executable(pioneerml_inference
   src/pioneerml_inference/runner/group_classifier_event_runner.cpp
   src/pioneerml_inference/runner/group_splitter_runner.cpp
   src/pioneerml_inference/runner/group_splitter_event_runner.cpp
+  src/pioneerml_inference/runner/event_splitter_event_runner.cpp
+  src/pioneerml_inference/runner/endpoint_regressor_runner.cpp
+  src/pioneerml_inference/runner/endpoint_regressor_event_runner.cpp
 )
 
 target_include_directories(pioneerml_inference
